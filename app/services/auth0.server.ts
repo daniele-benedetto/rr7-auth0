@@ -14,6 +14,8 @@ if (!AUTH0_CLIENT_SECRET) throw new Error('Missing Auth0 client secret.');
 if (!AUTH0_CALLBACK_URL) throw new Error('Missing Auth0 redirect uri.');
 if (!AUTH0_AUDIENCE) throw new Error('Missing Auth0 audience.');
 
+console.log(`[Auth0] Initializing with domain: ${AUTH0_DOMAIN}, audience: ${AUTH0_AUDIENCE}`);
+
 // Object containing Auth0 configuration values
 const auth0Config = {
   clientId: AUTH0_CLIENT_ID,
@@ -40,6 +42,7 @@ export class Auth0Service {
    * Initializes axios client and token cache
    */
   private constructor() {
+    console.log('[Auth0] Service instance created');
     this.auth0Api = axios.create({
       baseURL: `https://${auth0Config.domain}`,
       headers: {
@@ -85,7 +88,9 @@ export class Auth0Service {
       state,
       audience: auth0Config.audience,
     });
-    return `${this.auth0Url}/authorize?${params.toString()}`;
+    const loginUrl = `${this.auth0Url}/authorize?${params.toString()}`;
+    console.log(`[Auth0] Generated login URL with state: ${state.substring(0, 8)}...`);
+    return loginUrl;
   }
 
   /**
@@ -99,6 +104,7 @@ export class Auth0Service {
       client_id: auth0Config.clientId,
       returnTo: returnTo,
     });
+    console.log(`[Auth0] Generated logout URL with returnTo: ${returnTo}`);
     return `${this.auth0Url}/v2/logout?${params.toString()}`;
   }
 
@@ -110,7 +116,12 @@ export class Auth0Service {
   private isTokenExpired(expiresAt: number): boolean {
     const now = Date.now();
     const fiveMinutes = 5 * 60 * 1000;
-    return now >= expiresAt - fiveMinutes;
+    const timeLeft = expiresAt - now;
+    const expired = now >= expiresAt - fiveMinutes;
+    if (expired) {
+      console.log(`[Auth0] Token expired or will expire soon (${Math.round(timeLeft / 1000)}s remaining)`);
+    }
+    return expired;
   }
 
   /**
@@ -126,6 +137,7 @@ export class Auth0Service {
     expiresAt: number;
   }> {
     try {
+      console.log(`[Auth0] Exchanging authorization code for token...`);
       // Request tokens from Auth0
       const { data } = await this.auth0Api.post('/oauth/token', {
         grant_type: 'authorization_code',
@@ -136,8 +148,12 @@ export class Auth0Service {
       });
       // Calculate when the token will expire
       const expiresAt = Date.now() + data.expires_in * 1000;
+      console.log(`[Auth0] Token exchange successful, expires in ${data.expires_in}s`);
+
       // Fetch user info using the access token
       const userInfo = await this.fetchUserInfo(data.access_token);
+      console.log(`[Auth0] Retrieved user info for ${userInfo.email || userInfo.sub}`);
+
       // Cache the token information
       this.tokenCache.set(data.access_token, {
         accessToken: data.access_token,
@@ -154,6 +170,7 @@ export class Auth0Service {
       };
     } catch (error: any) {
       const errorMessage = error.response?.data?.error_description || error.message;
+      console.error(`[Auth0] Token exchange failed: ${errorMessage}`, error.response?.data);
       throw new Error(`Failed to exchange code for token: ${errorMessage}`);
     }
   }
@@ -165,6 +182,7 @@ export class Auth0Service {
    */
   private async refreshToken(refreshToken: string): Promise<TokenInfo> {
     try {
+      console.log(`[Auth0] Refreshing token...`);
       // Request a new access token using the refresh token
       const { data } = await this.auth0Api.post('/oauth/token', {
         grant_type: 'refresh_token',
@@ -174,6 +192,8 @@ export class Auth0Service {
       });
       // Calculate expiration time
       const expiresAt = Date.now() + data.expires_in * 1000;
+      console.log(`[Auth0] Token refresh successful, expires in ${data.expires_in}s`);
+
       // Get user info with the new token
       const userInfo = await this.fetchUserInfo(data.access_token);
       // Create token info object
@@ -190,6 +210,7 @@ export class Auth0Service {
       return tokenInfo;
     } catch (error: any) {
       const errorMessage = error.response?.data?.error_description || error.message;
+      console.error(`[Auth0] Token refresh failed: ${errorMessage}`, error.response?.data);
       throw new Error(`Failed to refresh token: ${errorMessage}`);
     }
   }
@@ -201,13 +222,16 @@ export class Auth0Service {
    */
   private async fetchUserInfo(accessToken: string): Promise<User> {
     try {
+      console.log(`[Auth0] Fetching user info...`);
       // Call Auth0 userinfo endpoint
       const { data } = await this.auth0Api.get('/userinfo', {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
+      console.log(`[Auth0] User info retrieved for ${data.email || data.sub}`);
       return data;
     } catch (error: any) {
       const errorMessage = error.response?.data?.error_description || error.message;
+      console.error(`[Auth0] Failed to fetch user info: ${errorMessage}`, error.response?.data);
       throw new Error(`Failed to fetch user info: ${errorMessage}`);
     }
   }
@@ -221,59 +245,68 @@ export class Auth0Service {
    */
   async getUserInfo(accessToken: string, request?: Request): Promise<User> {
     try {
+      console.log(`[Auth0] Getting user info for token: ${accessToken.substring(0, 10)}...`);
       // Check in-memory cache for token information
       const cachedToken = this.tokenCache.get(accessToken);
       let sessionTokenInfo: Partial<TokenInfo> = {};
       let session;
-      
+
       // If request is provided, try to get token info from session
       if (request) {
         session = await getSession(request.headers.get('Cookie'));
         const sessionUser = session.get('user');
         const sessionAccessToken = session.get('accessToken');
         if (sessionUser && sessionAccessToken) {
+          console.log(`[Auth0] Found user info in session for: ${sessionUser.email || sessionUser.sub}`);
           sessionTokenInfo = {
             userInfo: sessionUser as User,
             accessToken: sessionAccessToken,
           };
+        } else {
+          console.log(`[Auth0] No user info found in session`);
         }
       }
-      
+
       // Merge session info with cached info
       const tokenInfo = {
         ...sessionTokenInfo,
         ...(cachedToken || {}),
       };
-      
+
       // If no token information is found, throw error
       if (!tokenInfo.accessToken && !tokenInfo.userInfo) {
+        console.log(`[Auth0] No token or user info found in cache or session`);
         throw new Error('No token information found');
       }
-      
+
       // Check if token or user info is expired
       const isTokenExpired = tokenInfo.expiresAt ? this.isTokenExpired(tokenInfo.expiresAt) : true;
       const isUserInfoExpired = tokenInfo.userInfoTimestamp ? this.isUserInfoExpired(tokenInfo.userInfoTimestamp) : true;
       const cachedUserInfo = tokenInfo.userInfo;
       const cachedRefreshToken = tokenInfo.refreshToken;
-      
+
       // Return cached user info if it's still valid
       if (!isTokenExpired && !isUserInfoExpired && cachedUserInfo) {
+        console.log(`[Auth0] Using cached user info for: ${cachedUserInfo.email || cachedUserInfo.sub}`);
         return cachedUserInfo;
       }
-      
+
       // If we have a refresh token, use it to get new tokens
       if (cachedRefreshToken) {
+        console.log(`[Auth0] Need to refresh token (expired=${isTokenExpired}, userInfoExpired=${isUserInfoExpired})`);
         const newTokenInfo = await this.refreshToken(cachedRefreshToken);
         // Update session if available
         if (session && newTokenInfo.userInfo) {
+          console.log(`[Auth0] Updating session with new token info`);
           session.set('accessToken', newTokenInfo.accessToken);
           session.set('user', newTokenInfo.userInfo);
           await commitSession(session);
         }
         return newTokenInfo.userInfo || ({} as User);
       }
-      
+
       // Fetch user info directly if no refresh token is available
+      console.log(`[Auth0] No refresh token available, fetching user info directly`);
       const userInfo = await this.fetchUserInfo(accessToken);
       const updatedTokenInfo = {
         ...tokenInfo,
@@ -281,16 +314,18 @@ export class Auth0Service {
         userInfo,
         userInfoTimestamp: Date.now(),
       };
-      
+
       // Update cache and session
       this.tokenCache.set(accessToken, updatedTokenInfo as TokenInfo);
       if (session) {
+        console.log(`[Auth0] Updating session with newly fetched user info`);
         session.set('user', userInfo);
         await commitSession(session);
       }
       return userInfo;
     } catch (error: any) {
       const errorMessage = error.response?.data?.error_description || error.message;
+      console.error(`[Auth0] Get user info failed: ${errorMessage}`, error);
       throw new Error(`Failed to get user info: ${errorMessage}`);
     }
   }
@@ -302,19 +337,27 @@ export class Auth0Service {
    */
   async verifySession(request: Request): Promise<boolean> {
     try {
+      console.log(`[Auth0] Verifying session...`);
       // Get session from request
       const session = await getSession(request.headers.get('Cookie'));
       const accessToken = session.get('accessToken');
       const user = session.get('user');
-      
+
       // If no access token exists, session is invalid
       if (!accessToken) {
+        console.log(`[Auth0] No access token in session`);
+        // Clear any potential stale data
+        session.unset('accessToken');
+        session.unset('user');
+        await commitSession(session);
         return false;
       }
-      
+
       // If we have both token and user, check/update cache
       if (accessToken && user) {
+        console.log(`[Auth0] Session valid: Token and user found for ${user.email || user.sub}`);
         if (!this.tokenCache.has(accessToken)) {
+          console.log(`[Auth0] Adding token to cache from session`);
           // Add to cache if not present
           this.tokenCache.set(accessToken, {
             accessToken,
@@ -326,18 +369,32 @@ export class Auth0Service {
         }
         return true;
       }
-      
+
       // If we have token but no user, try to fetch user info
       try {
+        console.log(`[Auth0] Token found but no user in session. Fetching user info...`);
         const userInfo = await this.fetchUserInfo(accessToken);
         session.set('user', userInfo);
         await commitSession(session);
+        console.log(`[Auth0] User info fetched and added to session: ${userInfo.email || userInfo.sub}`);
         return true;
       } catch (error) {
-        // If fetching user info fails, session is invalid
+        // If fetching user info fails, clean session and cache
+        console.error('[Auth0] Failed to fetch user info during session verification:', error);
+        session.unset('accessToken');
+        session.unset('user');
+        await commitSession(session);
+
+        // Clear token from cache if it exists
+        if (this.tokenCache.has(accessToken)) {
+          console.log(`[Auth0] Removing invalid token from cache`);
+          this.tokenCache.delete(accessToken);
+        }
+
         return false;
       }
     } catch (error) {
+      console.error('[Auth0] Session verification error:', error);
       return false;
     }
   }
@@ -349,11 +406,14 @@ export class Auth0Service {
    * @throws Error if no access token is found
    */
   async getAccessToken(request: Request): Promise<string> {
+    console.log(`[Auth0] Getting access token from session...`);
     const session = await getSession(request.headers.get('Cookie'));
     const accessToken = session.get('accessToken');
     if (!accessToken) {
+      console.error(`[Auth0] No access token found in session`);
       throw new Error('No access token found');
     }
+    console.log(`[Auth0] Access token retrieved from session: ${accessToken.substring(0, 10)}...`);
     return accessToken;
   }
 }
