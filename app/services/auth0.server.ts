@@ -47,8 +47,8 @@ export class Auth0Service {
   private auth0Url: string;
   // In-memory cache for tokens and user information
   private tokenCache: Map<string, TokenInfo>;
-  // Cache time for user information (5 minutes)
-  private readonly USER_INFO_CACHE_TIME = 5 * 60 * 1000;
+  // Cache time for user information (24 hours)
+  private readonly USER_INFO_CACHE_TIME = 24 * 60 * 60 * 1000;
   // Near-expiration time buffer (5 minutes)
   private readonly TOKEN_EXPIRATION_BUFFER = 5 * 60 * 1000;
 
