@@ -203,6 +203,19 @@ export class Auth0Service {
   }
 
   /**
+   * Revokes a refresh token
+   * @param token - The refresh token to revoke
+   */
+  private async revokeRefreshToken(token: string): Promise<void> {
+    await this.auth0Api.post('/oauth/revoke', {
+      client_id: auth0Config.clientId,
+      client_secret: auth0Config.clientSecret,
+      token,
+      token_type_hint: 'refresh_token',
+    });
+  }
+
+  /**
    * Gets a new access token using a refresh token
    * @param refreshToken - The refresh token to use
    * @returns New token information including user details
@@ -217,6 +230,15 @@ export class Auth0Service {
         client_secret: auth0Config.clientSecret,
         refresh_token: refreshToken,
       });
+
+      try {
+        if (data.refresh_token) {
+          log(`Revoking old refresh token...`, 'debug');
+          await this.revokeRefreshToken(refreshToken);
+        }
+      } catch (error) {
+        log('Failed to revoke refresh token', 'error');
+      }
 
       // Calculate expiration time
       const expiresAt = Date.now() + data.expires_in * 1000;
