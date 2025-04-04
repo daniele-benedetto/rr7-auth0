@@ -1,6 +1,13 @@
 import { Form, redirect } from 'react-router';
 import { auth0Service } from '../../services/auth0.server';
 
+export function meta() {
+  return [
+    { title: 'rr7-auth0 Login page' },
+    { name: 'description', content: 'Login page' }
+  ];
+}
+
 export async function action() {
   const state = crypto.randomUUID();
   const loginUrl = auth0Service.getLoginUrl(state);

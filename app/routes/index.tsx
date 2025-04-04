@@ -3,8 +3,8 @@ import { Form } from 'react-router';
 
 export function meta() {
   return [
-    { title: 'React Router 7 - Auth0' },
-    { name: 'description', content: 'React Router 7 - Auth0' }
+    { title: 'rr7-auth0 Home page' },
+    { name: 'description', content: 'Home page' }
   ];
 }
 

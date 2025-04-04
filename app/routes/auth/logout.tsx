@@ -3,6 +3,13 @@ import { auth0Service } from '../../services/auth0.server';
 import { destroySession, getSession } from '../../services/sessions.server';
 import type { Route } from './+types/logout';
 
+export function meta() {
+  return [
+    { title: 'rr7-auth0 Logout page' },
+    { name: 'description', content: 'Logout page' }
+  ];
+}
+
 export async function loader({ request }: Route.LoaderArgs) {
   try {
     const session = await getSession(request.headers.get('Cookie'));

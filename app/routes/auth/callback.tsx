@@ -3,6 +3,13 @@ import { auth0Service } from '~/services/auth0.server';
 import { commitSession, getSession } from '~/services/sessions.server';
 import type { Route } from './+types/callback';
 
+export function meta() {
+  return [
+    { title: 'rr7-auth0 Callback page' },
+    { name: 'description', content: 'Callback page' }
+  ];
+}
+
 export async function loader({ request }: Route.LoaderArgs) {
   try {
     const url = new URL(request.url);
