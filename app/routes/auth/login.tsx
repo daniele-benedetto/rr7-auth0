@@ -8,6 +8,14 @@ export function meta() {
   ];
 }
 
+export async function loader({ request }: { request: Request }) {
+  const hasValidSession = await auth0Service.verifySession(request);
+  if (hasValidSession) {
+    return redirect('/');
+  }
+  return null;
+}
+
 export async function action() {
   const state = crypto.randomUUID();
   const loginUrl = auth0Service.getLoginUrl(state);
