@@ -51,6 +51,9 @@ export class Auth0Service {
   private readonly USER_INFO_CACHE_TIME = 24 * 60 * 60 * 1000;
   // Near-expiration time buffer (5 minutes)
   private readonly TOKEN_EXPIRATION_BUFFER = 5 * 60 * 1000;
+  // Rate limiting tracking
+  private rateLimitFailures = 0;
+  private readonly MAX_RATE_LIMIT_FAILURES = 3;
 
   /**
    * Private constructor to enforce singleton pattern
@@ -146,7 +149,20 @@ export class Auth0Service {
    */
   private handleApiError(error: any, context: string): never {
     const errorMessage = error.response?.data?.error_description || error.message;
+    const status = error.response?.status;
+
     log(`${context}: ${errorMessage}`, 'error');
+
+    // Check for rate limiting (HTTP 429)
+    if (status === 429) {
+      this.rateLimitFailures++;
+      log(`Rate limit hit. Failure count: ${this.rateLimitFailures}/${this.MAX_RATE_LIMIT_FAILURES}`, 'error');
+
+      if (this.rateLimitFailures >= this.MAX_RATE_LIMIT_FAILURES) {
+        throw new Error('RATE_LIMIT_EXCEEDED');
+      }
+    }
+
     throw new Error(`${context}: ${errorMessage}`);
   }
 
@@ -445,6 +461,9 @@ export class Auth0Service {
             userInfoTimestamp: Date.now(),
           });
         }
+
+        // Reset rate limit failures on successful verification
+        this.rateLimitFailures = 0;
         return true;
       }
 
@@ -453,8 +472,17 @@ export class Auth0Service {
         log(`Token found but no user in session. Fetching user info...`, 'debug');
         const userInfo = await this.fetchUserInfo(accessToken);
         await this.updateSession(session, { userInfo });
+        // Reset rate limit failures on successful fetch
+        this.rateLimitFailures = 0;
         return true;
-      } catch (error) {
+      } catch (error: any) {
+        // Check if we hit the rate limit threshold
+        if (error.message === 'RATE_LIMIT_EXCEEDED') {
+          log('Rate limit exceeded, forcing logout', 'error');
+          await this.cleanSession(session);
+          return false;
+        }
+
         // If fetching user info fails, clean session and cache
         log('Failed to fetch user info during session verification', 'error');
         await this.cleanSession(session);
